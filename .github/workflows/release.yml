@@ -51,15 +51,15 @@ jobs:
           java-version: 17
 
       - name: Release Apk Sign
+        if: ${{ needs.prepare.outputs.sign }}
         run: |
-          # not use this output
-          # echo "KeyStore=yes" >> $GITHUB_OUTPUT
-          echo -e "\n" >> gradle.properties
-          echo RELEASE_KEY_ALIAS='${{ secrets.RELEASE_KEY_ALIAS }}' >> gradle.properties
-          echo RELEASE_KEY_PASSWORD='${{ secrets.RELEASE_KEY_PASSWORD }}' >> gradle.properties
-          echo RELEASE_STORE_PASSWORD='${{ secrets.RELEASE_STORE_PASSWORD }}' >> gradle.properties
-          echo RELEASE_STORE_FILE='./key.jks' >> gradle.properties
-          echo ${{ secrets.RELEASE_KEY_STORE }} | base64 --decode > $GITHUB_WORKSPACE/app/key.jks
+         echo -e "\n" >> gradle.properties
+         echo RELEASE_KEY_ALIAS='${{ secrets.RELEASE_KEY_ALIAS }}' >> gradle.properties
+         echo RELEASE_KEY_PASSWORD='${{ secrets.RELEASE_KEY_PASSWORD }}' >> gradle.properties
+         echo RELEASE_STORE_PASSWORD='${{ secrets.RELEASE_STORE_PASSWORD }}' >> gradle.properties
+         echo RELEASE_STORE_FILE='./key.jks' >> gradle.properties
+         echo ${{ secrets.RELEASE_KEY_STORE }} | base64 --decode > $GITHUB_WORKSPACE/app/key.jks
+
 
       - name: Unify Version Name
         run: |
@@ -71,9 +71,10 @@ jobs:
 
       - name: Build With Gradle
         run: |
-          echo "开始进行${{ env.product }}构建"
-          chmod +x gradlew
-          ./gradlew assemble${{ env.product }}release --build-cache --parallel --daemon --warning-mode all
+         echo "开始进行${{ env.product }}构建"
+         chmod +x gradlew
+         ./gradlew assembleDebug --build-cache --parallel --daemon --warning-mode all
+
 
       - name: Organize the Files
         run: |
