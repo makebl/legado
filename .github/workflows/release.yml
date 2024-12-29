@@ -17,9 +17,11 @@ jobs:
 
       - name: Build Debug APK
         run: |
-          echo "开始构建调试 APK"
-          chmod +x gradlew
-          ./gradlew assembleDebug --build-cache --parallel --daemon --warning-mode all
+         echo "开始构建调试 APK"
+         chmod +x gradlew
+         ./gradlew assembleDebug --build-cache --parallel --daemon --warning-mode all
+         ls -la app/build/outputs/apk/debug/
+
 
       - name: Organize the Files
         run: |
