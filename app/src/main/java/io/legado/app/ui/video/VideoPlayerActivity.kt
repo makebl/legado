@@ -67,10 +67,34 @@ class VideoPlayerActivity : VMBaseActivity<ActivityVideoPlayerBinding, VideoPlay
         }
     private val tocActivityResult = registerForActivityResult(TocActivityResult()) {
         it?.let {
-            if (it.first != VideoPlay.durChapterIndex) {
-                VideoPlay.durChapterIndex = it.first
+            if (it.third) {
+                if (VideoPlay.volumes.isEmpty()) {
+                    VideoPlay.chapterInVolumeIndex = it.first
+                } else {
+                    for ((index, volume) in VideoPlay.volumes.reversed().withIndex()) {
+                        if (volume.index < it.first) {
+                            VideoPlay.chapterInVolumeIndex = it.first - volume.index - 1
+                            VideoPlay.durVolumeIndex = VideoPlay.volumes.size - index - 1
+                            VideoPlay.durVolume = volume
+                            break
+                        } else if (volume.index == it.first) {
+                            VideoPlay.chapterInVolumeIndex = 0
+                            VideoPlay.durVolumeIndex = VideoPlay.volumes.size - index - 1
+                            VideoPlay.durVolume = volume
+                            break
+                        }
+                    }
+                }
                 VideoPlay.durChapterPos = it.second
+                VideoPlay.upEpisodes()
                 VideoPlay.saveRead()
+                if (VideoPlay.episodes.isNullOrEmpty()) {
+                    binding.chapters.visibility = View.GONE
+                } else {
+                    binding.chapters.visibility = View.VISIBLE
+                    val adapter = binding.chapters.adapter as? ChapterAdapter
+                    adapter?.updateData(VideoPlay.episodes)
+                }
                 upView()
                 VideoPlay.startPlay(playerView)
             }
@@ -113,7 +137,18 @@ class VideoPlayerActivity : VMBaseActivity<ActivityVideoPlayerBinding, VideoPlay
         binding.root.setBackgroundColor(backgroundColor)
         if (VideoPlay.book != null) {
             VideoPlay.book?.let { showBook(it) }
-            VideoPlay.toc?.let { showToc(it) }
+            if (VideoPlay.episodes.isNullOrEmpty()) {
+                binding.chapters.visibility = View.GONE
+            } else {
+                binding.chapters.visibility = View.VISIBLE
+                showToc(VideoPlay.episodes!!)
+            }
+            if (VideoPlay.volumes.isEmpty()) {
+                binding.volumes.visibility = View.GONE
+            } else {
+                binding.volumes.visibility = View.VISIBLE
+                showVolumes(VideoPlay.volumes)
+            }
         } else {
             binding.data.visibility = View.INVISIBLE
             binding.chaptersContainer.visibility = View.INVISIBLE
@@ -142,9 +177,9 @@ class VideoPlayerActivity : VMBaseActivity<ActivityVideoPlayerBinding, VideoPlay
         val recyclerView = binding.chapters
         val layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
         recyclerView.layoutManager = layoutManager
-        val adapter = ChapterAdapter(toc,VideoPlay.durChapterIndex) { chapter ->
-            if (chapter.index != VideoPlay.durChapterIndex) {
-                VideoPlay.durChapterIndex = chapter.index
+        val adapter = ChapterAdapter(toc,VideoPlay.chapterInVolumeIndex, false) { chapter, index ->
+            if (index != VideoPlay.chapterInVolumeIndex) {
+                VideoPlay.chapterInVolumeIndex = index
                 VideoPlay.durChapterPos = 0
                 VideoPlay.saveRead()
                 upView()
@@ -152,10 +187,36 @@ class VideoPlayerActivity : VMBaseActivity<ActivityVideoPlayerBinding, VideoPlay
             }
         }
         recyclerView.adapter = adapter
-        scrollToDurChapter(recyclerView)
+        scrollToDurChapter(recyclerView, VideoPlay.chapterInVolumeIndex)
     }
 
-    private fun scrollToDurChapter(recyclerView: RecyclerView) {
+    private fun showVolumes(volumes: List<BookChapter>) {
+        val recyclerView = binding.volumes
+        val layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
+        recyclerView.layoutManager = layoutManager
+        val adapter = ChapterAdapter(volumes,VideoPlay.durVolumeIndex, true) { chapter, index ->
+            if (index != VideoPlay.durVolumeIndex) {
+                VideoPlay.durVolumeIndex = index
+                VideoPlay.chapterInVolumeIndex = 0
+                VideoPlay.durChapterPos = 0
+                VideoPlay.upEpisodes()
+                if (VideoPlay.episodes.isNullOrEmpty()) {
+                    binding.chapters.visibility = View.GONE
+                } else {
+                    binding.chapters.visibility = View.VISIBLE
+                    val adapter = binding.chapters.adapter as? ChapterAdapter
+                    adapter?.updateData(VideoPlay.episodes)
+                }
+                VideoPlay.saveRead()
+                upView()
+                VideoPlay.startPlay(playerView)
+            }
+        }
+        recyclerView.adapter = adapter
+        scrollToDurChapter(recyclerView, VideoPlay.durVolumeIndex)
+    }
+
+    private fun scrollToDurChapter(recyclerView: RecyclerView, index: Int) {
         recyclerView.postDelayed({
             val layoutManager = recyclerView.layoutManager as? LinearLayoutManager
             layoutManager?.run {
@@ -164,26 +225,31 @@ class VideoPlayerActivity : VMBaseActivity<ActivityVideoPlayerBinding, VideoPlay
                         return SNAP_TO_START // 滚动到最左边
                     }
                 }
-                smoothScroller.targetPosition = VideoPlay.durChapterIndex
+                smoothScroller.targetPosition = index
                 this.startSmoothScroll(smoothScroller)
             }
             val adapter = recyclerView.adapter as? ChapterAdapter
-            adapter?.updateSelectedPosition(VideoPlay.durChapterIndex)
+            adapter?.updateSelectedPosition(index)
         }, 200)
     }
 
     private fun upView() {
-        scrollToDurChapter(binding.chapters)
+        if (!VideoPlay.episodes.isNullOrEmpty()) {
+            scrollToDurChapter(binding.chapters, VideoPlay.chapterInVolumeIndex)
+        }
+        if (!VideoPlay.volumes.isEmpty()) {
+            scrollToDurChapter(binding.volumes, VideoPlay.durVolumeIndex)
+        }
         binding.titleBar.title = VideoPlay.videoTitle
     }
 
     private fun toggleFullScreen() {
-        orientationUtils?.resolveByClick()
         isFullScreen = !isFullScreen
         toggleSystemBar(!isFullScreen)
         if (isFullScreen) {
             orientationUtils?.isOnlyRotateLand = true //旋转时仅处理横屏
             orientationUtils?.isRotateWithSystem = false //跟随系统旋转
+            orientationUtils?.resolveByClick()
             supportActionBar?.hide()
             binding.chaptersContainer.gone()
             binding.data.gone()
@@ -191,6 +257,7 @@ class VideoPlayerActivity : VMBaseActivity<ActivityVideoPlayerBinding, VideoPlay
         } else {
             orientationUtils?.isOnlyRotateLand = false
             orientationUtils?.isRotateWithSystem = true
+            orientationUtils?.resolveByClick()
             supportActionBar?.show()
             if (VideoPlay.book != null) {
                 binding.chaptersContainer.visible()

@@ -42,6 +42,7 @@ import io.legado.app.lib.theme.backgroundColor
 import io.legado.app.lib.theme.bottomBackground
 import io.legado.app.lib.theme.getPrimaryTextColor
 import io.legado.app.model.BookCover
+import io.legado.app.model.VideoPlay
 import io.legado.app.model.remote.RemoteBookWebDav
 import io.legado.app.ui.about.AppLogDialog
 import io.legado.app.ui.book.audio.AudioPlayActivity
@@ -94,7 +95,33 @@ class BookInfoActivity :
             viewModel.getBook(false)?.let { book ->
                 lifecycleScope.launch {
                     withContext(IO) {
-                        book.durChapterIndex = it.first
+                        if (book.isVideo) {
+                            VideoPlay.volumes.clear()
+                            appDb.bookChapterDao.getChapterList(book.bookUrl).forEach { chapter ->
+                                if (chapter.isVolume) {
+                                    VideoPlay.volumes.add(chapter)
+                                }
+                            }
+                            if (VideoPlay.volumes.isEmpty()) {
+                                VideoPlay.chapterInVolumeIndex = it.first
+                            } else {
+                                for ((index, volume) in VideoPlay.volumes.reversed().withIndex()) {
+                                    if (volume.index < it.first) {
+                                        book.chapterInVolumeIndex = it.first - volume.index - 1
+                                        book.durVolumeIndex = VideoPlay.volumes.size - index - 1
+                                        VideoPlay.durVolume = volume
+                                        break
+                                    } else if (volume.index == it.first) {
+                                        book.chapterInVolumeIndex = 0
+                                        book.durVolumeIndex = VideoPlay.volumes.size - index - 1
+                                        VideoPlay.durVolume = volume
+                                        break
+                                    }
+                                }
+                            }
+                        } else {
+                            book.durChapterIndex = it.first
+                        }
                         book.durChapterPos = it.second
                         chapterChanged = it.third
                         appDb.bookDao.update(book)
@@ -104,7 +131,7 @@ class BookInfoActivity :
             }
         } ?: let {
             if (!viewModel.inBookshelf) {
-                viewModel.delBook()
+                viewModel.delBook() //进目录会保存book，此时退出目录触发的book删除，不通知书源回调
             }
         }
     }
@@ -150,6 +177,7 @@ class BookInfoActivity :
     private var chapterChanged = false
     private val waitDialog by lazy { WaitDialog(this) }
     private var editMenuItem: MenuItem? = null
+    private var menuCustomBtn: MenuItem? = null
     private val book get() = viewModel.getBook(false)
 
     override val binding by viewBinding(ActivityBookInfoBinding::inflate)
@@ -171,6 +199,7 @@ class BookInfoActivity :
         }
         viewModel.bookData.observe(this) { showBook(it) }
         viewModel.chapterListData.observe(this) { upLoading(false, it) }
+        viewModel.customBtnListData.observe(this) { menuCustomBtn?.isVisible = it }
         viewModel.waitDialogData.observe(this) { upWaitDialogStatus(it) }
         viewModel.initData(intent)
         initViewEvent()
@@ -179,6 +208,7 @@ class BookInfoActivity :
     override fun onCompatCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.book_info, menu)
         editMenuItem = menu.findItem(R.id.menu_edit)
+        menuCustomBtn = menu.findItem(R.id.menu_custom_btn)
         return super.onCompatCreateOptionsMenu(menu)
     }
 
@@ -206,6 +236,14 @@ class BookInfoActivity :
 
     override fun onCompatOptionsItemSelected(item: MenuItem): Boolean {
         when (item.itemId) {
+            R.id.menu_custom_btn -> {
+                viewModel.bookSource?.customButton?.let {
+                    viewModel.getBook()?.let { book ->
+                        SourceCallBack.callBackBtn(this,SourceCallBack.CLICK_CUSTOM_BUTTON, viewModel.bookSource, book, null)
+                    }
+                }
+            }
+
             R.id.menu_edit -> {
                 viewModel.getBook()?.let {
                     infoEditResult.launch {
@@ -216,7 +254,7 @@ class BookInfoActivity :
 
             R.id.menu_share_it -> {
                 viewModel.getBook()?.let {
-                    SourceCallBack.callBackShare(this,viewModel.bookSource, it) {
+                    SourceCallBack.callBackBtn(this,SourceCallBack.CLICK_SHARE_BOOK, viewModel.bookSource, it, null) {
                         val bookJson = GSON.toJson(it)
                         val shareStr = "${it.bookUrl}#$bookJson"
                         val intent = Intent(Intent.ACTION_SEND)
@@ -494,7 +532,7 @@ class BookInfoActivity :
             }
             viewModel.getBook()?.let { book ->
                 if (!viewModel.inBookshelf) {
-                    viewModel.saveBook(book) {
+                    viewModel.saveBook(book) { //点击目录会保存book
                         viewModel.saveChapterList {
                             openChapterList()
                         }
@@ -513,15 +551,19 @@ class BookInfoActivity :
         }
         tvAuthor.setOnClickListener {
             viewModel.getBook(false)?.let { book ->
-                startActivity<SearchActivity> {
-                    putExtra("key", book.author)
+                SourceCallBack.callBackBtn(this@BookInfoActivity, SourceCallBack.CLICK_AUTHOR, viewModel.bookSource, book, null) {
+                    startActivity<SearchActivity> {
+                        putExtra("key", book.author)
+                    }
                 }
             }
         }
         tvName.setOnClickListener {
             viewModel.getBook(false)?.let { book ->
-                startActivity<SearchActivity> {
-                    putExtra("key", book.name)
+                SourceCallBack.callBackBtn(this@BookInfoActivity, SourceCallBack.CLICK_BOOK_NAME, viewModel.bookSource, book, null) {
+                    startActivity<SearchActivity> {
+                        putExtra("key", book.name)
+                    }
                 }
             }
         }
@@ -589,14 +631,14 @@ class BookInfoActivity :
 
     @SuppressLint("InflateParams")
     private fun deleteBook() {
-        viewModel.getBook()?.let {
+        viewModel.getBook()?.let { book ->
             if (LocalConfig.bookInfoDeleteAlert) {
                 alert(
                     titleResource = R.string.draw,
                     messageResource = R.string.sure_del
                 ) {
                     var checkBox: CheckBox? = null
-                    if (it.isLocal) {
+                    if (book.isLocal) {
                         checkBox = CheckBox(this@BookInfoActivity).apply {
                             setText(R.string.delete_book_file)
                             isChecked = LocalConfig.deleteBookOriginal
@@ -611,6 +653,7 @@ class BookInfoActivity :
                         if (checkBox != null) {
                             LocalConfig.deleteBookOriginal = checkBox.isChecked
                         }
+                        SourceCallBack.callBackBook(SourceCallBack.DEL_BOOK_SHELF, viewModel.bookSource, book) //确认后删除书架
                         viewModel.delBook(LocalConfig.deleteBookOriginal) {
                             setResult(RESULT_OK)
                             finish()
@@ -619,6 +662,7 @@ class BookInfoActivity :
                     noButton()
                 }
             } else {
+                SourceCallBack.callBackBook(SourceCallBack.DEL_BOOK_SHELF, viewModel.bookSource, book) //点按钮直接删除书架
                 viewModel.delBook(LocalConfig.deleteBookOriginal) {
                     setResult(RESULT_OK)
                     finish()

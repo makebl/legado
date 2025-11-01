@@ -3,6 +3,7 @@ package io.legado.app.ui.book.info
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
+import android.view.MenuItem
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
 import io.legado.app.R
@@ -48,6 +49,7 @@ import kotlinx.coroutines.Dispatchers.IO
 class BookInfoViewModel(application: Application) : BaseViewModel(application) {
     val bookData = MutableLiveData<Book>()
     val chapterListData = MutableLiveData<List<BookChapter>>()
+    val customBtnListData = MutableLiveData<Boolean>()
     val webFiles = mutableListOf<WebFile>()
     var inBookshelf = false
     var bookSource: BookSource? = null
@@ -108,6 +110,7 @@ class BookInfoViewModel(application: Application) : BaseViewModel(application) {
                     loadChapter(book, isFromBookInfo = true)
                 }
             }
+            customBtnListData.postValue(bookSource?.customButton == true)
         }
     }
 
@@ -421,7 +424,7 @@ class BookInfoViewModel(application: Application) : BaseViewModel(application) {
         }
     }
 
-    fun addToBookshelf(success: (() -> Unit)?) {
+    fun addToBookshelf(success: (() -> Unit)?) { //点击书架按钮或在加分组时触发
         execute {
             bookData.value?.let { book ->
                 book.removeType(BookType.notShelf)
@@ -439,7 +442,7 @@ class BookInfoViewModel(application: Application) : BaseViewModel(application) {
                     AudioPlay.book = book
                 }
                 book.save()
-                SourceCallBack.callBackBookShelf(bookSource, book, true)
+                SourceCallBack.callBackBook(SourceCallBack.ADD_BOOK_SHELF, bookSource, book)
             }
             chapterListData.value?.let {
                 appDb.bookChapterDao.insert(*it.toTypedArray())
@@ -466,7 +469,6 @@ class BookInfoViewModel(application: Application) : BaseViewModel(application) {
                 if (it.isLocal) {
                     LocalBook.deleteBook(it, deleteOriginal)
                 }
-                SourceCallBack.callBackBookShelf(bookSource, it, false)
             }
         }.onSuccess {
             success?.invoke()
@@ -482,7 +484,7 @@ class BookInfoViewModel(application: Application) : BaseViewModel(application) {
             if (ReadManga.book?.bookUrl == bookData.value!!.bookUrl) {
                 ReadManga.clearMangaChapter()
             }
-            SourceCallBack.callBackClearCache(bookSource, bookData.value!!)
+            SourceCallBack.callBackBook(SourceCallBack.CLEAR_CACHE, bookSource, bookData.value!!)
         }.onSuccess {
             context.toastOnUi(R.string.clear_cache_success)
         }.onError {
